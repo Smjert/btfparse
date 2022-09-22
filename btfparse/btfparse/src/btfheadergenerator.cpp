@@ -260,9 +260,11 @@ void BTFHeaderGenerator::scanTypes(Context &context) {
     context.highest_btf_type_id = std::max(context.highest_btf_type_id, id);
 
     const auto &btf_type = p.second;
+    auto btf_kind = IBTF::getBTFTypeKind(btf_type);
+
     bool skip_type{true};
 
-    switch (IBTF::getBTFTypeKind(btf_type)) {
+    switch (btf_kind) {
     case BTFKind::Struct:
     case BTFKind::Union:
     case BTFKind::Enum:
@@ -293,6 +295,11 @@ void BTFHeaderGenerator::scanTypes(Context &context) {
     auto opt_type_name = getTypeName(context, id);
     if (!opt_type_name.has_value()) {
       continue;
+    }
+
+    if (btf_kind == BTFKind::Fwd) {
+      const auto &type_name = opt_type_name.value();
+      context.fwd_type_map.insert({type_name, id});
     }
 
     context.top_level_type_list.insert(id);
@@ -657,8 +664,6 @@ bool BTFHeaderGenerator::createTypeTreeHelper(Context &context,
     }
     }
 
-    // this should only filter out things like INT, FLOAT, etc.
-    // should add a throw just in case
     return true;
   }
 
@@ -764,7 +769,8 @@ bool BTFHeaderGenerator::adjustTypedefDependencyLoops(Context &context) {
 
         typedef_dependency_list.erase(struct_id);
 
-        auto fwd_id = createFwdType(context, is_union, opt_struct_name.value());
+        auto fwd_id =
+            getOrCreateFwdType(context, is_union, opt_struct_name.value());
         typedef_dependency_list.insert({fwd_id, false});
 
         typedef_map.insert({typedef_id, struct_id});
@@ -851,7 +857,7 @@ bool BTFHeaderGenerator::createTypeQueueHelper(Context &context,
 
         auto opt_type_name = getTypeName(context, linked_type);
         auto fwd_type_id =
-            createFwdType(context, is_union, opt_type_name.value());
+            getOrCreateFwdType(context, is_union, opt_type_name.value());
 
         context.type_queue.push_back(fwd_type_id);
 
@@ -950,16 +956,24 @@ void BTFHeaderGenerator::resetState(Context &context) {
   context.opt_variable_name = std::nullopt;
 }
 
-std::uint32_t BTFHeaderGenerator::createFwdType(Context &context, bool is_union,
-                                                const std::string &name) {
-  btfparse::FwdBTFType fwd_btf_type;
-  fwd_btf_type.is_union = is_union;
-  fwd_btf_type.name = name;
+std::uint32_t BTFHeaderGenerator::getOrCreateFwdType(Context &context,
+                                                     bool is_union,
+                                                     const std::string &name) {
 
-  auto id = ++context.btf_type_id_generator;
+  auto fwd_type_id_it = context.fwd_type_map.find(name);
+  if (fwd_type_id_it == context.fwd_type_map.end()) {
+    btfparse::FwdBTFType fwd_btf_type;
+    fwd_btf_type.is_union = is_union;
+    fwd_btf_type.name = name;
 
-  context.btf_type_map.insert({id, std::move(fwd_btf_type)});
-  return id;
+    auto id = ++context.btf_type_id_generator;
+    context.btf_type_map.insert({id, std::move(fwd_btf_type)});
+
+    auto insert_status = context.fwd_type_map.insert({name, id});
+    fwd_type_id_it = insert_status.first;
+  }
+
+  return fwd_type_id_it->second;
 }
 
 template <typename Type>

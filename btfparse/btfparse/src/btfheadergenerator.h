@@ -30,6 +30,8 @@ public:
   struct Context final {
     BTFTypeMap btf_type_map;
     std::unordered_set<std::uint32_t> top_level_type_list;
+    std::unordered_map<std::string, std::uint32_t> fwd_type_map;
+
     std::uint32_t highest_btf_type_id{0};
     std::uint32_t btf_type_id_generator{0};
 
@@ -102,8 +104,8 @@ public:
   static void popState(Context &context);
   static void resetState(Context &context);
 
-  static std::uint32_t createFwdType(Context &context, bool is_union,
-                                     const std::string &name);
+  static std::uint32_t getOrCreateFwdType(Context &context, bool is_union,
+                                          const std::string &name);
 
   static bool generateType(Context &context, std::stringstream &buffer,
                            std::uint32_t id,
